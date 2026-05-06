@@ -48,5 +48,7 @@ class AlertEvent:
 class MonitorConfig:
     tickers: list[str]
     interval_seconds: int = 30
-    start_date: date | None = None
-    end_date: date | None = None
+    finra_start_date: date | None = None
+    finra_end_date: date | None = None
+    otc_start_date: date | None = None
+    otc_end_date: date | None = None
