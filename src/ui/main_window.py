@@ -297,6 +297,16 @@ class MainWindow(QMainWindow):
         sound_row.addWidget(clear_sound)
         sound_row.addWidget(test_sound)
         snd.addLayout(sound_row)
+
+        test_alert_row = QHBoxLayout()
+        test_alert_row.setSpacing(10)
+        test_alert_btn = QPushButton("Send Test Alert")
+        test_alert_btn.setObjectName("primaryButton")
+        test_alert_btn.clicked.connect(self._send_test_alert)
+        test_alert_row.addWidget(test_alert_btn)
+        test_alert_row.addWidget(_hint("Triggers a fake alert to test popup, sound, notification, and history."))
+        test_alert_row.addStretch(1)
+        snd.addLayout(test_alert_row)
         layout.addWidget(sound_card)
 
         # —— Appearance ——
@@ -442,13 +452,33 @@ class MainWindow(QMainWindow):
             return
         self.alert_manager.play_test()
 
+    def _send_test_alert(self) -> None:
+        from src.models import AlertEvent, AlertSource, ListingRecord
+
+        fake_record = ListingRecord(
+            ticker="TEST",
+            source="FINRA + OTC",
+            status="Test Alert",
+            description="This is a test alert to verify popup, sound, and notification.",
+            relevant_date=date.today(),
+            raw_excerpt="Sample data for testing purposes.",
+        )
+        fake_event = AlertEvent(
+            ticker="TEST",
+            source=AlertSource.BOTH,
+            description="Test listing match: FINRA Daily List + OTC Markets grace period",
+            event_time=datetime.now(),
+            finra_records=[fake_record],
+            otc_records=[fake_record],
+        )
+        self._on_alert(fake_event)
+        self._append_log("[TEST] Fake alert triggered for UI testing")
+
     def _sync_alert_sound(self) -> None:
         self.alert_manager.set_alert_sound(self._effective_alert_sound_path())
 
     def _default_date_range(self) -> tuple[date, date]:
-        today = date.today()
-        start = today.replace(day=1)
-        return start, today
+        return date(2015, 1, 1), date(2026, 12, 31)
 
     def _load_settings_into_ui(self) -> None:
         s = load_settings()
@@ -578,7 +608,7 @@ class MainWindow(QMainWindow):
 
     def _on_alert(self, event: AlertEvent) -> None:
         self._sync_alert_sound()
-        popup = ListingAlertPopup(self, event)
+        popup = ListingAlertPopup(self, event, alert_manager=self.alert_manager)
         popup.setStyleSheet(self.styleSheet())
         popup.show()
         self.alert_manager.dispatch(event)

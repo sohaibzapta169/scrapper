@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 import re
 from datetime import date
 
-import requests
+import cloudscraper
 from bs4 import BeautifulSoup
 
 from src.models import ListingRecord
@@ -13,32 +12,35 @@ from src.scraper.utils import collect_dates_from_text, date_in_range, normalize_
 
 class OtcMarketsScraper:
     BASE_URL = "https://www.otcmarkets.com/stock/{ticker}/overview"
-    KEYWORDS = (
+
+    STATUS_KEYWORDS = (
         "grace period",
-        "grace",
         "caveat emptor",
-        "limited information",
-        "current information",
         "expert market",
+        "shell risk",
+        "bankruptcy",
+        "delinquent",
+        "dark",
+        "grey market",
+        "stop sign",
+        "yield sign",
+        "skull",
+    )
+
+    TIER_KEYWORDS = (
+        "pink limited",
+        "pink current",
+        "pink no information",
         "otcqx",
         "otcqb",
         "pink",
-        "warning",
-        "otc markets",
-        "market tier",
+        "expert",
+        "grey",
     )
 
-    def __init__(self, timeout_seconds: int = 15) -> None:
+    def __init__(self, timeout_seconds: int = 20) -> None:
         self.timeout_seconds = timeout_seconds
-        self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
-                )
-            }
-        )
+        self.scraper = cloudscraper.create_scraper()
 
     def fetch_ticker(
         self,
@@ -48,107 +50,131 @@ class OtcMarketsScraper:
     ) -> list[ListingRecord]:
         ticker = normalize_ticker(ticker)
         url = self.BASE_URL.format(ticker=ticker)
+
         try:
-            resp = self.session.get(url, timeout=self.timeout_seconds)
+            resp = self.scraper.get(url, timeout=self.timeout_seconds)
             resp.raise_for_status()
-        except requests.RequestException:
+        except Exception:
             return []
 
-        soup = BeautifulSoup(resp.text, "html.parser")
-        status_lines = self._extract_status_lines(soup)
-        status_lines.extend(self._extract_from_next_data(soup))
-        status_lines = list(dict.fromkeys(line.strip() for line in status_lines if line.strip()))
-
-        if not status_lines:
+        html = resp.text
+        if not html:
             return []
 
+        soup = BeautifulSoup(html, "html.parser")
         records: list[ListingRecord] = []
-        for line in status_lines:
-            parsed_date = None
-            found_dates = collect_dates_from_text(line)
-            if found_dates:
-                parsed_date = found_dates[0]
-            if not date_in_range(parsed_date, start_date, end_date):
-                continue
 
+        # Check page title for ticker presence
+        title = soup.select_one("title")
+        title_text = title.get_text(" ", strip=True) if title else ""
+
+        # Extract any status/tier info from the page
+        page_text = soup.get_text(" ", strip=True).lower()
+
+        # Detect market tier from page content
+        tier_found = None
+        for kw in self.TIER_KEYWORDS:
+            if kw in page_text:
+                tier_found = self._classify_tier(kw)
+                break
+
+        if tier_found:
             records.append(
                 ListingRecord(
                     ticker=ticker,
                     source="OTC",
-                    status=self._classify_status(line),
-                    description=line[:400],
-                    relevant_date=parsed_date,
-                    raw_excerpt=line[:800],
+                    status=tier_found,
+                    description=f"{ticker} - OTC Markets - {tier_found}",
+                    relevant_date=None,
+                    raw_excerpt=title_text[:800],
                 )
             )
 
+        # Look for warning/status keywords
+        for kw in self.STATUS_KEYWORDS:
+            if kw in page_text:
+                status = self._classify_status(kw)
+                # Find context around the keyword
+                idx = page_text.find(kw)
+                context = page_text[max(0, idx - 50) : idx + 100]
+                dates = collect_dates_from_text(context)
+
+                records.append(
+                    ListingRecord(
+                        ticker=ticker,
+                        source="OTC",
+                        status=status,
+                        description=f"{ticker} - {status} detected",
+                        relevant_date=dates[0] if dates else None,
+                        raw_excerpt=context[:800],
+                    )
+                )
+                break
+
+        # Look for grace period with dates
+        grace_pattern = re.compile(
+            r"grace\s+period[^.]*?(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\w+\s+\d{1,2},?\s+\d{4})",
+            re.I,
+        )
+        matches = grace_pattern.findall(html)
+        for match in matches[:2]:
+            dates = collect_dates_from_text(match)
+            if dates and date_in_range(dates[0], start_date, end_date):
+                records.append(
+                    ListingRecord(
+                        ticker=ticker,
+                        source="OTC",
+                        status="Grace Period",
+                        description=f"Grace period deadline: {match}",
+                        relevant_date=dates[0],
+                        raw_excerpt=match,
+                    )
+                )
+
+        # Filter by date range and deduplicate
         unique: dict[str, ListingRecord] = {}
         for record in records:
-            unique[record.signature()] = record
+            if record.relevant_date is None or date_in_range(record.relevant_date, start_date, end_date):
+                unique[record.signature()] = record
+
         return list(unique.values())
 
-    def _extract_status_lines(self, soup: BeautifulSoup) -> list[str]:
-        lines: list[str] = []
-        text_candidates = []
-        for node in soup.select("div,span,p,li,h1,h2,h3,h4,h5"):
-            text = node.get_text(" ", strip=True)
-            if text:
-                text_candidates.append(text)
-
-        for text in text_candidates:
-            low = text.lower()
-            if any(keyword in low for keyword in self.KEYWORDS):
-                lines.append(text)
-        return lines
-
-    def _extract_from_next_data(self, soup: BeautifulSoup) -> list[str]:
-        lines: list[str] = []
-        script = soup.select_one("script#__NEXT_DATA__")
-        if not script or not script.string:
-            return lines
-        try:
-            payload = json.loads(script.string)
-        except json.JSONDecodeError:
-            return lines
-
-        collected = self._collect_status_like_fields(payload)
-        lines.extend(collected)
-        return lines
-
-    def _collect_status_like_fields(self, data: object, parent_key: str = "") -> list[str]:
-        output: list[str] = []
-        status_like = ("status", "grace", "tier", "market", "caveat", "warning", "info")
-        if isinstance(data, dict):
-            for key, value in data.items():
-                key_low = str(key).lower()
-                full_key = f"{parent_key}.{key_low}" if parent_key else key_low
-                if isinstance(value, (str, int, float)):
-                    text = str(value).strip()
-                    if text and any(tag in key_low for tag in status_like):
-                        output.append(f"{full_key}: {text}")
-                    elif text and any(keyword in text.lower() for keyword in self.KEYWORDS):
-                        output.append(text)
-                else:
-                    output.extend(self._collect_status_like_fields(value, full_key))
-        elif isinstance(data, list):
-            for item in data:
-                output.extend(self._collect_status_like_fields(item, parent_key))
-        return output
+    def _classify_tier(self, text: str) -> str:
+        low = text.lower()
+        if "otcqx" in low:
+            return "OTCQX"
+        if "otcqb" in low:
+            return "OTCQB"
+        if "pink limited" in low:
+            return "Pink Limited"
+        if "pink current" in low:
+            return "Pink Current"
+        if "pink no information" in low:
+            return "Pink No Information"
+        if "expert" in low:
+            return "Expert Market"
+        if "grey" in low or "gray" in low:
+            return "Grey Market"
+        if "pink" in low:
+            return "Pink"
+        return "OTC"
 
     def _classify_status(self, text: str) -> str:
         low = text.lower()
         if "grace" in low:
             return "Grace Period"
-        if "caveat" in low or "warning" in low:
-            return "Warning"
-        if "expert market" in low:
-            return "Expert Market"
-        if "otcqx" in low:
-            return "OTCQX"
-        if "otcqb" in low:
-            return "OTCQB"
-        if "pink" in low:
-            return "Pink"
-        if re.search(r"\b(current|limited)\s+information\b", low):
-            return "Information Tier"
-        return "Status Match"
+        if "caveat" in low or "skull" in low:
+            return "Caveat Emptor"
+        if "stop" in low:
+            return "Stop Sign"
+        if "yield" in low:
+            return "Yield Sign"
+        if "shell" in low:
+            return "Shell Risk"
+        if "bankruptcy" in low:
+            return "Bankruptcy"
+        if "delinquent" in low:
+            return "Delinquent"
+        if "dark" in low:
+            return "Dark/Defunct"
+        return "Warning"

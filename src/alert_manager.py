@@ -56,6 +56,14 @@ class AlertManager(QObject):
     def play_test(self) -> None:
         self.play_alert_sound()
 
+    def stop_sound(self) -> None:
+        """Stop any currently playing alert sound."""
+        if self._player is not None:
+            try:
+                self._player.stop()
+            except Exception:  # noqa: BLE001
+                pass
+
     def play_alert_sound(self) -> None:
         path = self._sound_path
         if path:
