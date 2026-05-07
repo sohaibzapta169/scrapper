@@ -635,9 +635,13 @@ class MainWindow(QMainWindow):
             self.showNormal()
             self.activateWindow()
 
+    def _asset_icon_url(self, filename: str) -> str:
+        return str((Path(__file__).resolve().parents[2] / "assets" / "icons" / filename).resolve()).replace(
+            "\\", "/"
+        )
+
     def _apply_dark_theme(self) -> None:
-        self.setStyleSheet(
-            """
+        style = """
             QWidget { background: #0f1117; color: #e8ecf4; }
             QFrame#headerCard {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #1a2030, stop:1 #121826);
@@ -661,33 +665,71 @@ class MainWindow(QMainWindow):
                 background: #3a2e1c; color: #f0c97a; border: 1px solid #6b542e;
             }
             QLineEdit, QPlainTextEdit, QListWidget, QAbstractSpinBox, QDateEdit {
-                background: #10151f; border: 1px solid #334055; border-radius: 8px;
+                background: rgba(9, 15, 25, 0.5); border: 1px solid #334055; border-radius: 9px;
                 padding: 6px 10px; color: #eef2ff; selection-background-color: #3d5a99;
             }
             QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QAbstractSpinBox:focus, QDateEdit:focus {
                 border: 1px solid #5b7fd4;
             }
             QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {
-                width: 20px; border: none; border-left: 1px solid #334055; background: #1a2233;
-                border-top-right-radius: 8px; border-bottom-right-radius: 8px;
+                width: 24px; border: none; border-left: 1px solid #334055; background: transparent;
+            }
+            QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {
+                background: rgba(122, 154, 227, 0.18);
+            }
+            QAbstractSpinBox::up-button:pressed, QAbstractSpinBox::down-button:pressed {
+                background: rgba(122, 154, 227, 0.3);
             }
             QDateEdit::drop-down {
-                width: 26px; border: none; border-left: 1px solid #334055; background: #1a2233;
-                border-top-right-radius: 8px; border-bottom-right-radius: 8px;
+                width: 28px; border: none; border-left: 1px solid #334055; background: transparent;
+            }
+            QDateEdit::drop-down:hover { background: rgba(122, 154, 227, 0.18); }
+            QDateEdit::drop-down:pressed { background: rgba(122, 154, 227, 0.3); }
+            QAbstractSpinBox::up-arrow {
+                image: url("__UP_ICON__");
+                width: 12px;
+                height: 12px;
+            }
+            QAbstractSpinBox::down-arrow, QDateEdit::down-arrow {
+                image: url("__DOWN_ICON__");
+                width: 12px;
+                height: 12px;
             }
             QPushButton {
-                background: #222a3d; border: 1px solid #3d4d6f; border-radius: 8px;
-                padding: 8px 16px; font-weight: 600; color: #e8ecf4; min-height: 20px;
+                background: #1f2f4f; border: 1px solid #41557e; border-radius: 10px;
+                padding: 8px 18px; font-weight: 600; color: #eef3ff; min-height: 20px;
             }
-            QPushButton:hover { background: #2a344d; }
-            QPushButton:pressed { background: #1a2233; }
-            QPushButton#primaryButton { background: #3d6ee8; border: 1px solid #5c86ef; color: #ffffff; }
-            QPushButton#primaryButton:hover { background: #4f7df0; }
-            QPushButton#ghostButton { background: transparent; border: 1px dashed #4a5878; color: #b8c4e6; }
-            QPushButton#ghostButton:hover { background: #1a2233; }
-            QPushButton#smallButton { padding: 6px 12px; font-weight: 600; font-size: 0.95em; }
-            QPushButton:disabled { color: #5c667d; background: #151a24; border-color: #2a3142; }
+            QPushButton:hover { background: #2b3f66; border-color: #5d77aa; }
+            QPushButton:pressed { background: #172743; }
+            QPushButton#primaryButton {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #3f78f6, stop:1 #2f63d8);
+                border: 1px solid #6790f5;
+                color: #ffffff;
+            }
+            QPushButton#primaryButton:hover {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #4f86fb, stop:1 #3d72e6);
+            }
+            QPushButton#ghostButton { background: transparent; border: 1px dashed #5a6f9b; color: #c0ceef; }
+            QPushButton#ghostButton:hover { background: rgba(122, 154, 227, 0.16); }
+            QPushButton#smallButton { padding: 6px 13px; font-weight: 600; font-size: 0.95em; }
+            QPushButton:disabled { color: #657290; background: #151a24; border-color: #2a3142; }
             QCheckBox { spacing: 8px; font-weight: 600; }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                border: 1px solid #4a5f8c;
+                background: transparent;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #7392cb;
+                background: rgba(122, 154, 227, 0.16);
+            }
+            QCheckBox::indicator:checked {
+                border-color: #5b84db;
+                background: #2b4f97;
+                image: url("__CHECK_ICON__");
+            }
             QScrollArea { background: transparent; border: none; }
             QTextEdit { background: #10151f; border: 1px solid #334055; border-radius: 8px; color: #eef2ff; }
             QSplitter::handle { background: #2a3348; height: 3px; }
@@ -701,11 +743,14 @@ class MainWindow(QMainWindow):
                 selection-background-color: #3d5a99; color: #eff4ff;
             }
             """
+        self.setStyleSheet(
+            style.replace("__UP_ICON__", self._asset_icon_url("chevron-up-light.svg"))
+            .replace("__DOWN_ICON__", self._asset_icon_url("chevron-down-light.svg"))
+            .replace("__CHECK_ICON__", self._asset_icon_url("check-light.svg"))
         )
 
     def _apply_light_theme(self) -> None:
-        self.setStyleSheet(
-            """
+        style = """
             QWidget { background: #eef1f8; color: #1a2233; }
             QFrame#headerCard {
                 background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #ffffff, stop:1 #e8efff);
@@ -729,33 +774,71 @@ class MainWindow(QMainWindow):
                 background: #fff6e5; color: #8a6218; border: 1px solid #efd199;
             }
             QLineEdit, QPlainTextEdit, QListWidget, QAbstractSpinBox, QDateEdit {
-                background: #ffffff; border: 1px solid #c5d4ef; border-radius: 8px;
+                background: rgba(255, 255, 255, 0.55); border: 1px solid #c5d4ef; border-radius: 9px;
                 padding: 6px 10px; selection-background-color: #a8c4f5;
             }
             QLineEdit:focus, QPlainTextEdit:focus, QListWidget:focus, QAbstractSpinBox:focus, QDateEdit:focus {
                 border: 1px solid #4a78d9;
             }
             QAbstractSpinBox::up-button, QAbstractSpinBox::down-button {
-                width: 20px; border: none; border-left: 1px solid #c5d4ef; background: #eef3fc;
-                border-top-right-radius: 8px; border-bottom-right-radius: 8px;
+                width: 24px; border: none; border-left: 1px solid #c5d4ef; background: transparent;
+            }
+            QAbstractSpinBox::up-button:hover, QAbstractSpinBox::down-button:hover {
+                background: rgba(59, 102, 184, 0.12);
+            }
+            QAbstractSpinBox::up-button:pressed, QAbstractSpinBox::down-button:pressed {
+                background: rgba(59, 102, 184, 0.22);
             }
             QDateEdit::drop-down {
-                width: 26px; border: none; border-left: 1px solid #c5d4ef; background: #eef3fc;
-                border-top-right-radius: 8px; border-bottom-right-radius: 8px;
+                width: 28px; border: none; border-left: 1px solid #c5d4ef; background: transparent;
+            }
+            QDateEdit::drop-down:hover { background: rgba(59, 102, 184, 0.12); }
+            QDateEdit::drop-down:pressed { background: rgba(59, 102, 184, 0.22); }
+            QAbstractSpinBox::up-arrow {
+                image: url("__UP_ICON__");
+                width: 12px;
+                height: 12px;
+            }
+            QAbstractSpinBox::down-arrow, QDateEdit::down-arrow {
+                image: url("__DOWN_ICON__");
+                width: 12px;
+                height: 12px;
             }
             QPushButton {
-                background: #eef3fc; border: 1px solid #c5d4ef; border-radius: 8px;
-                padding: 8px 16px; font-weight: 600; color: #1f3358; min-height: 20px;
+                background: #edf3ff; border: 1px solid #bccfeb; border-radius: 10px;
+                padding: 8px 18px; font-weight: 600; color: #1f3358; min-height: 20px;
             }
-            QPushButton:hover { background: #e4ecfa; }
-            QPushButton:pressed { background: #d9e4f8; }
-            QPushButton#primaryButton { background: #2f6feb; border: 1px solid #4a82f0; color: #ffffff; }
-            QPushButton#primaryButton:hover { background: #2563d4; }
+            QPushButton:hover { background: #e4edff; border-color: #9cb8e8; }
+            QPushButton:pressed { background: #d6e4ff; }
+            QPushButton#primaryButton {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #3b82f6, stop:1 #2563eb);
+                border: 1px solid #4f83f0;
+                color: #ffffff;
+            }
+            QPushButton#primaryButton:hover {
+                background: qlineargradient(x1:0,y1:0,x2:1,y2:1, stop:0 #4b8eff, stop:1 #2f6ef0);
+            }
             QPushButton#ghostButton { background: transparent; border: 1px dashed #9db0d4; color: #3d5278; }
-            QPushButton#ghostButton:hover { background: #eef3fc; }
-            QPushButton#smallButton { padding: 6px 12px; font-weight: 600; font-size: 0.95em; }
+            QPushButton#ghostButton:hover { background: rgba(59, 102, 184, 0.1); }
+            QPushButton#smallButton { padding: 6px 13px; font-weight: 600; font-size: 0.95em; }
             QPushButton:disabled { color: #8a96ad; background: #f3f5fa; border-color: #dde5f2; }
             QCheckBox { spacing: 8px; font-weight: 600; }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border-radius: 5px;
+                border: 1px solid #9fb4d9;
+                background: transparent;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #7899d8;
+                background: rgba(59, 102, 184, 0.08);
+            }
+            QCheckBox::indicator:checked {
+                border-color: #3f74dd;
+                background: #4e7ee8;
+                image: url("__CHECK_ICON__");
+            }
             QScrollArea { background: transparent; border: none; }
             QTextEdit { background: #ffffff; border: 1px solid #c5d4ef; border-radius: 8px; color: #1a2233; }
             QSplitter::handle { background: #d5e0f4; height: 3px; }
@@ -769,4 +852,8 @@ class MainWindow(QMainWindow):
                 selection-background-color: #a8c4f5; color: #233553;
             }
             """
+        self.setStyleSheet(
+            style.replace("__UP_ICON__", self._asset_icon_url("chevron-up-dark.svg"))
+            .replace("__DOWN_ICON__", self._asset_icon_url("chevron-down-dark.svg"))
+            .replace("__CHECK_ICON__", self._asset_icon_url("check-dark.svg"))
         )
