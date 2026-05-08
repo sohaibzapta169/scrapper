@@ -74,11 +74,12 @@ class MonitorWorker(QObject):
         assert self._config is not None
         ticker = normalize_ticker(ticker)
         finra_records = self._finra.fetch_ticker(
-            ticker, self._config.finra_start_date, self._config.finra_end_date
+            ticker,
+            self._config.finra_start_date,
+            self._config.finra_end_date,
+            self._config.finra_event_types,
         )
-        otc_records = self._otc.fetch_ticker(
-            ticker, self._config.otc_start_date, self._config.otc_end_date
-        )
+        otc_records = self._otc.fetch_ticker(ticker, None, None)
         source = self._resolve_source(finra_records, otc_records)
         if source is None:
             self.log_message.emit(
@@ -89,11 +90,12 @@ class MonitorWorker(QObject):
 
         # Mandatory second confirmation step before any alert.
         finra_confirm = self._finra.fetch_ticker(
-            ticker, self._config.finra_start_date, self._config.finra_end_date
+            ticker,
+            self._config.finra_start_date,
+            self._config.finra_end_date,
+            self._config.finra_event_types,
         )
-        otc_confirm = self._otc.fetch_ticker(
-            ticker, self._config.otc_start_date, self._config.otc_end_date
-        )
+        otc_confirm = self._otc.fetch_ticker(ticker, None, None)
         source_confirm = self._resolve_source(finra_confirm, otc_confirm)
         if source_confirm != source:
             self.log_message.emit(f"[{ticker}] first pass mismatch after re-check, skipped")

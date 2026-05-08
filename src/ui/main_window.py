@@ -32,12 +32,11 @@ from PySide6.QtWidgets import (
 )
 
 from src.alert_manager import AlertManager
-from src.models import AlertEvent, MonitorConfig
+from src.models import AlertEvent, FINRA_EVENT_TYPES, MonitorConfig
 from src.monitor_worker import MonitorWorker
 from src.scraper.utils import normalize_ticker
 from src.ringtone_paths import default_alert_sound_path, ringtone_dir
 from src.settings_store import AppSettings, load_settings, parse_iso_date, save_settings
-from src.ui.alert_popup import ListingAlertPopup
 
 
 def _section_title(text: str) -> QLabel:
@@ -183,17 +182,17 @@ class MainWindow(QMainWindow):
         sl.addWidget(_hint("How long to wait between full passes across all tickers. First pass runs immediately."))
         layout.addWidget(sched)
 
-        # —— Date range ——
+        # —— Date range (FINRA only) ——
         date_card = QFrame()
         date_card.setObjectName("card")
         dl = QVBoxLayout(date_card)
         dl.setContentsMargins(18, 16, 18, 16)
         dl.setSpacing(10)
-        dl.addWidget(_section_title("Date range"))
+        dl.addWidget(_section_title("Date range (FINRA Daily List)"))
         dl.addWidget(
             _hint(
-                "Only FINRA rows and OTC overview snippets whose parsed dates fall between From and To are treated as matches. "
-                "Use separate ranges only if you intentionally want a wider FINRA window than OTC (or the reverse)."
+                "Date range filter applies only to FINRA Daily List rows. "
+                "OTC status checks (Grace Period, Dark/Defunct, Market Tier) are always live/current."
             )
         )
         ug = QGridLayout()
@@ -210,60 +209,53 @@ class MainWindow(QMainWindow):
         ug.addWidget(self.unified_end, 1, 1)
         dl.addLayout(ug)
 
-        self.separate_dates_check = QCheckBox("Separate date ranges: FINRA daily list vs OTC Markets page")
-        self.separate_dates_check.toggled.connect(self._on_separate_dates_toggled)
-        dl.addWidget(self.separate_dates_check)
-
-        self._per_source_dates_wrap = QWidget()
-        dates_row = QHBoxLayout(self._per_source_dates_wrap)
-        dates_row.setContentsMargins(0, 4, 0, 0)
-        dates_row.setSpacing(14)
-
-        finra_card = QFrame()
-        finra_card.setObjectName("card")
-        fl = QVBoxLayout(finra_card)
-        fl.setContentsMargins(16, 14, 16, 14)
-        fl.setSpacing(8)
-        fl.addWidget(_section_title("FINRA OTC Daily List"))
-        fl.addWidget(_hint("Daily list row dates must fall in this window."))
-        fg = QGridLayout()
-        self.finra_start = QDateEdit()
-        self.finra_start.setCalendarPopup(True)
-        self.finra_end = QDateEdit()
-        self.finra_end.setCalendarPopup(True)
-        for w in (self.finra_start, self.finra_end):
-            w.setMinimumHeight(32)
-        fg.addWidget(QLabel("From"), 0, 0)
-        fg.addWidget(self.finra_start, 0, 1)
-        fg.addWidget(QLabel("To"), 1, 0)
-        fg.addWidget(self.finra_end, 1, 1)
-        fl.addLayout(fg)
-        dates_row.addWidget(finra_card, stretch=1)
-
-        otc_card = QFrame()
-        otc_card.setObjectName("card")
-        ol = QVBoxLayout(otc_card)
-        ol.setContentsMargins(16, 14, 16, 14)
-        ol.setSpacing(8)
-        ol.addWidget(_section_title("OTC Markets"))
-        ol.addWidget(_hint("Dates parsed from overview / grace text must fall in this window."))
-        og = QGridLayout()
-        self.otc_start = QDateEdit()
-        self.otc_start.setCalendarPopup(True)
-        self.otc_end = QDateEdit()
-        self.otc_end.setCalendarPopup(True)
-        for w in (self.otc_start, self.otc_end):
-            w.setMinimumHeight(32)
-        og.addWidget(QLabel("From"), 0, 0)
-        og.addWidget(self.otc_start, 0, 1)
-        og.addWidget(QLabel("To"), 1, 0)
-        og.addWidget(self.otc_end, 1, 1)
-        ol.addLayout(og)
-        dates_row.addWidget(otc_card, stretch=1)
-
-        dl.addWidget(self._per_source_dates_wrap)
-        self._per_source_dates_wrap.setVisible(False)
         layout.addWidget(date_card)
+
+        # —— FINRA Event Type Filters ——
+        event_filter_card = QFrame()
+        event_filter_card.setObjectName("card")
+        ef_layout = QVBoxLayout(event_filter_card)
+        ef_layout.setContentsMargins(18, 16, 18, 16)
+        ef_layout.setSpacing(10)
+        ef_layout.addWidget(_section_title("FINRA Event Type Filters"))
+        ef_layout.addWidget(
+            _hint(
+                "Select which FINRA event types to monitor. Uncheck events you want to ignore. "
+                "If none are checked, all events are included."
+            )
+        )
+        
+        # Create checkboxes for each event type in a grid layout
+        self.event_type_checkboxes: dict[str, QCheckBox] = {}
+        event_grid = QGridLayout()
+        event_grid.setHorizontalSpacing(16)
+        event_grid.setVerticalSpacing(6)
+        
+        for idx, event_type in enumerate(FINRA_EVENT_TYPES):
+            cb = QCheckBox(event_type)
+            cb.setChecked(True)  # Default: all checked
+            self.event_type_checkboxes[event_type] = cb
+            row = idx // 2
+            col = idx % 2
+            event_grid.addWidget(cb, row, col)
+        
+        ef_layout.addLayout(event_grid)
+        
+        # Select All / Deselect All buttons
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.setObjectName("smallButton")
+        select_all_btn.clicked.connect(self._select_all_event_types)
+        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn.setObjectName("smallButton")
+        deselect_all_btn.clicked.connect(self._deselect_all_event_types)
+        btn_row.addWidget(select_all_btn)
+        btn_row.addWidget(deselect_all_btn)
+        btn_row.addStretch(1)
+        ef_layout.addLayout(btn_row)
+        
+        layout.addWidget(event_filter_card)
 
         # —— Alert sound ——
         sound_card = QFrame()
@@ -305,7 +297,7 @@ class MainWindow(QMainWindow):
         test_alert_btn.setObjectName("warningButton")
         test_alert_btn.clicked.connect(self._send_test_alert)
         test_alert_row.addWidget(test_alert_btn)
-        test_alert_row.addWidget(_hint("Triggers a fake alert to test popup, sound, notification, and history."))
+        test_alert_row.addWidget(_hint("Triggers a fake alert to test in-window details, sound, and history."))
         test_alert_row.addStretch(1)
         snd.addLayout(test_alert_row)
         layout.addWidget(sound_card)
@@ -334,6 +326,26 @@ class MainWindow(QMainWindow):
         layout.addWidget(look)
 
         layout.addSpacing(8)
+
+        # —— Latest Match Details (in-window; replaces popup) ——
+        details_card = QFrame()
+        details_card.setObjectName("card")
+        details_layout = QVBoxLayout(details_card)
+        details_layout.setContentsMargins(16, 14, 16, 14)
+        details_layout.setSpacing(8)
+        details_layout.addWidget(_section_title("Latest match details"))
+        details_layout.addWidget(
+            _hint("When conditions are met, details are shown here (no separate popup window).")
+        )
+        self.latest_match_output = QPlainTextEdit()
+        self.latest_match_output.setReadOnly(True)
+        self.latest_match_output.setMinimumHeight(140)
+        self.latest_match_output.setPlaceholderText(
+            "No matches yet.\n"
+            "This section will show Grace Period (Yes/No + Date), market status, and FINRA reason/event details."
+        )
+        details_layout.addWidget(self.latest_match_output)
+        layout.addWidget(details_card)
 
         # —— History + log ——
         history_card = QFrame()
@@ -378,18 +390,30 @@ class MainWindow(QMainWindow):
         tray_menu.addAction(quit_action)
         self.tray_icon.setContextMenu(tray_menu)
 
-    def _on_separate_dates_toggled(self, separate: bool) -> None:
-        self._per_source_dates_wrap.setVisible(separate)
-        if separate:
-            self.finra_start.setDate(self.unified_start.date())
-            self.finra_end.setDate(self.unified_end.date())
-            self.otc_start.setDate(self.unified_start.date())
-            self.otc_end.setDate(self.unified_end.date())
+    def _select_all_event_types(self) -> None:
+        for cb in self.event_type_checkboxes.values():
+            cb.setChecked(True)
+
+    def _deselect_all_event_types(self) -> None:
+        for cb in self.event_type_checkboxes.values():
+            cb.setChecked(False)
+
+    def _get_selected_event_types(self) -> list[str] | None:
+        """Return list of selected event types, or None if all are selected (no filtering)."""
+        selected = [et for et, cb in self.event_type_checkboxes.items() if cb.isChecked()]
+        if len(selected) == len(FINRA_EVENT_TYPES) or len(selected) == 0:
+            return None  # No filtering needed
+        return selected
+
+    def _set_event_type_checkboxes(self, event_types: list[str] | None) -> None:
+        """Set checkbox states from saved settings."""
+        if event_types is None:
+            # All selected by default
+            for cb in self.event_type_checkboxes.values():
+                cb.setChecked(True)
         else:
-            self.unified_start.setDate(self.finra_start.date())
-            self.unified_end.setDate(self.finra_end.date())
-            self.otc_start.setDate(self.unified_start.date())
-            self.otc_end.setDate(self.unified_end.date())
+            for et, cb in self.event_type_checkboxes.items():
+                cb.setChecked(et in event_types)
 
     def _browse_alert_sound(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -452,23 +476,61 @@ class MainWindow(QMainWindow):
         self.alert_manager.play_test()
 
     def _send_test_alert(self) -> None:
+        from datetime import timedelta
         from src.models import AlertEvent, AlertSource, ListingRecord
 
-        fake_record = ListingRecord(
+        # Create a test grace period end date (e.g., 7 days from today)
+        test_grace_end = date.today() + timedelta(days=7)
+
+        # FINRA record with event type
+        fake_finra_record = ListingRecord(
             ticker="TEST",
-            source="FINRA + OTC",
-            status="Test Alert",
-            description="This is a test alert to verify popup, sound, and notification.",
+            source="FINRA",
+            status="Addition",
+            description="Test FINRA daily list entry.",
             relevant_date=date.today(),
-            raw_excerpt="Sample data for testing purposes.",
+            raw_excerpt="Sample FINRA data for testing purposes.",
+            event_type="Additions",
         )
+        
+        # OTC record with market tier
+        fake_otc_tier = ListingRecord(
+            ticker="TEST",
+            source="OTC",
+            status="Pink Limited",
+            description="Pink Limited Market tier.",
+            relevant_date=date.today(),
+            raw_excerpt="Market tier information.",
+        )
+        
+        # OTC record with Grace Period + end date
+        fake_otc_grace = ListingRecord(
+            ticker="TEST",
+            source="OTC",
+            status="Grace Period",
+            description="Grace Period status detected.",
+            relevant_date=date.today(),
+            raw_excerpt="Grace period information.",
+            grace_period_end=test_grace_end,
+        )
+        
+        # OTC record with Dark/Defunct status
+        fake_otc_dark = ListingRecord(
+            ticker="TEST",
+            source="OTC",
+            status="Dark/Defunct",
+            description="Dark or Defunct status detected.",
+            relevant_date=date.today(),
+            raw_excerpt="Dark/Defunct information.",
+        )
+        
         fake_event = AlertEvent(
             ticker="TEST",
             source=AlertSource.BOTH,
-            description="Test listing match: FINRA Daily List + OTC Markets grace period",
+            description="Test listing match: FINRA Daily List + OTC Markets (Pink Limited, Grace Period, Dark/Defunct)",
             event_time=datetime.now(),
-            finra_records=[fake_record],
-            otc_records=[fake_record],
+            finra_records=[fake_finra_record],
+            otc_records=[fake_otc_tier, fake_otc_grace, fake_otc_dark],
         )
         self._on_alert(fake_event)
         self._append_log("[TEST] Fake alert triggered for UI testing")
@@ -487,30 +549,8 @@ class MainWindow(QMainWindow):
         d0, d1 = self._default_date_range()
         fs = parse_iso_date(s.finra_start_iso) or d0
         fe = parse_iso_date(s.finra_end_iso) or d1
-        os_ = parse_iso_date(s.otc_start_iso) or d0
-        oe = parse_iso_date(s.otc_end_iso) or d1
-        separate = bool(s.separate_source_date_ranges)
-
-        self.finra_start.setDate(QDate(fs.year, fs.month, fs.day))
-        self.finra_end.setDate(QDate(fe.year, fe.month, fe.day))
-        self.otc_start.setDate(QDate(os_.year, os_.month, os_.day))
-        self.otc_end.setDate(QDate(oe.year, oe.month, oe.day))
-
-        self.separate_dates_check.blockSignals(True)
-        self.separate_dates_check.setChecked(separate)
-        self.separate_dates_check.blockSignals(False)
-        self._per_source_dates_wrap.setVisible(separate)
-
-        if separate:
-            self.unified_start.setDate(QDate(fs.year, fs.month, fs.day))
-            self.unified_end.setDate(QDate(fe.year, fe.month, fe.day))
-        else:
-            self.unified_start.setDate(QDate(fs.year, fs.month, fs.day))
-            self.unified_end.setDate(QDate(fe.year, fe.month, fe.day))
-            self.finra_start.setDate(self.unified_start.date())
-            self.finra_end.setDate(self.unified_end.date())
-            self.otc_start.setDate(self.unified_start.date())
-            self.otc_end.setDate(self.unified_end.date())
+        self.unified_start.setDate(QDate(fs.year, fs.month, fs.day))
+        self.unified_end.setDate(QDate(fe.year, fe.month, fe.day))
 
         self.font_size_spin.setValue(s.font_size)
         self.theme_toggle.blockSignals(True)
@@ -528,28 +568,22 @@ class MainWindow(QMainWindow):
             self.alert_sound_edit.setText(self._display_default_sound_path())
         self._sync_alert_sound()
 
+        # Load event type filters
+        self._set_event_type_checkboxes(s.finra_event_types)
+
     def _gather_settings(self) -> AppSettings:
-        separate = self.separate_dates_check.isChecked()
-        if not separate:
-            u0 = self.unified_start.date().toPython()
-            u1 = self.unified_end.date().toPython()
-            fs, fe, os_, oe = u0, u1, u0, u1
-        else:
-            fs = self.finra_start.date().toPython()
-            fe = self.finra_end.date().toPython()
-            os_ = self.otc_start.date().toPython()
-            oe = self.otc_end.date().toPython()
+        u0 = self.unified_start.date().toPython()
+        u1 = self.unified_end.date().toPython()
+        fs, fe = u0, u1
         return AppSettings(
             tickers_text=self.ticker_input.text(),
             interval_seconds=self.interval_spin.value(),
             finra_start_iso=fs.isoformat(),
             finra_end_iso=fe.isoformat(),
-            otc_start_iso=os_.isoformat(),
-            otc_end_iso=oe.isoformat(),
-            separate_source_date_ranges=separate,
             dark_mode=self.theme_toggle.isChecked(),
             font_size=self.font_size_spin.value(),
             alert_sound_path=self._alert_sound_for_storage(),
+            finra_event_types=self._get_selected_event_types(),
         )
 
     def _persist_settings(self) -> None:
@@ -569,24 +603,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Watchlist", "Enter at least one ticker.")
             return
 
-        if not self.separate_dates_check.isChecked():
-            f_start = self.unified_start.date().toPython()
-            f_end = self.unified_end.date().toPython()
-            if f_start > f_end:
-                QMessageBox.warning(self, "Date range", "From must be on or before To.")
-                return
-            o_start, o_end = f_start, f_end
-        else:
-            f_start = self.finra_start.date().toPython()
-            f_end = self.finra_end.date().toPython()
-            if f_start > f_end:
-                QMessageBox.warning(self, "FINRA dates", "FINRA From must be on or before To.")
-                return
-            o_start = self.otc_start.date().toPython()
-            o_end = self.otc_end.date().toPython()
-            if o_start > o_end:
-                QMessageBox.warning(self, "OTC dates", "OTC From must be on or before To.")
-                return
+        f_start = self.unified_start.date().toPython()
+        f_end = self.unified_end.date().toPython()
+        if f_start > f_end:
+            QMessageBox.warning(self, "Date range", "From must be on or before To.")
+            return
 
         self._sync_alert_sound()
         self._persist_settings()
@@ -596,8 +617,7 @@ class MainWindow(QMainWindow):
             interval_seconds=self.interval_spin.value(),
             finra_start_date=f_start,
             finra_end_date=f_end,
-            otc_start_date=o_start,
-            otc_end_date=o_end,
+            finra_event_types=self._get_selected_event_types(),
         )
         self.worker.start(config)
 
@@ -606,15 +626,74 @@ class MainWindow(QMainWindow):
 
     def _on_alert(self, event: AlertEvent) -> None:
         self._sync_alert_sound()
-        popup = ListingAlertPopup(self, event, alert_manager=self.alert_manager)
-        popup.setStyleSheet(self.styleSheet())
-        popup.show()
-        self.alert_manager.dispatch(event)
+        # In-window alerting only (no custom popup window).
+        self.alert_manager.play_alert_sound()
+        self._render_latest_match(event)
+        
+        # Build display text with grace period end date if available
         text = (
             f"{event.event_time.strftime('%H:%M:%S')} | {event.ticker} | "
             f"{event.source.value} | {event.description}"
         )
+        
+        # Check for grace period end date in OTC records
+        for record in event.otc_records:
+            if record.grace_period_end:
+                text += f" | Grace Period Ends: {record.grace_period_end.strftime('%m/%d/%Y')}"
+                break
+        
         self.alert_history.insertItem(0, QListWidgetItem(text))
+
+    def _render_latest_match(self, event: AlertEvent) -> None:
+        finra_reasons: list[str] = []
+        for record in event.finra_records:
+            reason = record.description.strip()
+            if reason and reason not in finra_reasons:
+                finra_reasons.append(reason)
+
+        otc_statuses: list[str] = []
+        market_tier = ""
+        grace_end = None
+        for record in event.otc_records:
+            if record.grace_period_end and grace_end is None:
+                grace_end = record.grace_period_end
+            status = record.status.strip()
+            if status and status not in otc_statuses:
+                otc_statuses.append(status)
+            if not market_tier and status.lower() in {
+                "pink limited",
+                "pink current",
+                "pink no information",
+                "otcqx",
+                "otcqb",
+                "expert market",
+                "grey market",
+                "pink",
+            }:
+                market_tier = status
+
+        grace_yes = any("grace" in s.lower() for s in otc_statuses) or grace_end is not None
+        grace_line = "Yes" if grace_yes else "No"
+        grace_date_line = grace_end.strftime("%m/%d/%Y") if grace_end else "N/A"
+
+        lines = [
+            f"Ticker: {event.ticker}",
+            f"Source: {event.source.value}",
+            f"Detected at: {event.event_time.strftime('%Y-%m-%d %H:%M:%S')}",
+            "",
+            "OTC Status",
+            f"- Grace Period: {grace_line}",
+            f"- Grace Period Date: {grace_date_line if grace_yes else 'N/A'}",
+            f"- Market Tier: {market_tier or 'N/A'}",
+            f"- Status Indicators: {', '.join(otc_statuses) if otc_statuses else 'N/A'}",
+            "",
+            "Daily List (FINRA) Reason",
+        ]
+        if finra_reasons:
+            lines.extend([f"- {r}" for r in finra_reasons[:6]])
+        else:
+            lines.append("- N/A")
+        self.latest_match_output.setPlainText("\n".join(lines))
 
     def _append_log(self, message: str) -> None:
         self.log_output.appendPlainText(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  {message}")

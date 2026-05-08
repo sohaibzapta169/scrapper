@@ -11,6 +11,20 @@ class AlertSource(str, Enum):
     BOTH = "FINRA + OTC"
 
 
+FINRA_EVENT_TYPES = (
+    "Additions",
+    "Deletions",
+    "Symbol/Name Changes",
+    "Financial Status Indicator Change",
+    "OATS Reportable Flag Change",
+    "Regulatory Transaction Fee Flag Change",
+    "Unit of Trades Change",
+    "Market Category Change",
+    "Bankruptcy",
+    "Dividends / Distributions / Splits",
+)
+
+
 @dataclass(slots=True)
 class ListingRecord:
     ticker: str
@@ -19,6 +33,8 @@ class ListingRecord:
     description: str
     relevant_date: date | None = None
     raw_excerpt: str = ""
+    event_type: str = ""
+    grace_period_end: date | None = None
 
     def signature(self) -> str:
         date_part = self.relevant_date.isoformat() if self.relevant_date else "no-date"
@@ -50,5 +66,4 @@ class MonitorConfig:
     interval_seconds: int = 30
     finra_start_date: date | None = None
     finra_end_date: date | None = None
-    otc_start_date: date | None = None
-    otc_end_date: date | None = None
+    finra_event_types: list[str] | None = None

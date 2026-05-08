@@ -30,6 +30,20 @@ class FinraScraper:
         "payabledate",
     )
 
+    # Maps raw FINRA reason/type codes to our normalized event type categories
+    EVENT_TYPE_KEYWORDS = {
+        "Additions": ("add", "new", "list"),
+        "Deletions": ("delete", "delist", "remove"),
+        "Symbol/Name Changes": ("symbol", "name", "change", "rename"),
+        "Financial Status Indicator Change": ("financial status", "fsi", "indicator"),
+        "OATS Reportable Flag Change": ("oats", "reportable"),
+        "Regulatory Transaction Fee Flag Change": ("regulatory", "fee", "transaction fee"),
+        "Unit of Trades Change": ("unit", "trade", "lot"),
+        "Market Category Change": ("market category", "category change", "tier"),
+        "Bankruptcy": ("bankrupt",),
+        "Dividends / Distributions / Splits": ("dividend", "distribution", "split", "spinoff"),
+    }
+
     def __init__(self, timeout_seconds: int = 30) -> None:
         self.timeout_seconds = timeout_seconds
         self.scraper = cloudscraper.create_scraper()
@@ -39,6 +53,7 @@ class FinraScraper:
         ticker: str,
         start_date: date | None,
         end_date: date | None,
+        event_types: list[str] | None = None,
     ) -> list[ListingRecord]:
         ticker = normalize_ticker(ticker)
         records: list[ListingRecord] = []
@@ -60,6 +75,12 @@ class FinraScraper:
                 continue
 
             record = self._record_from_row(row, ticker)
+
+            # Filter by event type if specified
+            if event_types and record.event_type:
+                if record.event_type not in event_types:
+                    continue
+
             if date_in_range(record.relevant_date, start_date, end_date):
                 records.append(record)
 
@@ -110,6 +131,7 @@ class FinraScraper:
         )
 
         status = self._classify_status(reason, normalized)
+        event_type = self._classify_event_type(reason, normalized)
 
         relevant_date = None
         for field in self.DATE_FIELDS:
@@ -136,7 +158,23 @@ class FinraScraper:
             description=f"{description} - {reason}"[:400],
             relevant_date=relevant_date,
             raw_excerpt=excerpt[:800],
+            event_type=event_type,
         )
+
+    def _classify_event_type(self, reason: str, row: dict[str, str]) -> str:
+        """Classify the FINRA record into one of the standard event types."""
+        combined = f"{reason} {' '.join(row.values())}".lower()
+
+        for event_type, keywords in self.EVENT_TYPE_KEYWORDS.items():
+            for kw in keywords:
+                if kw in combined:
+                    return event_type
+
+        # Check bankruptcy flag explicitly
+        if row.get("bankruptcyflag", "").upper() == "Y":
+            return "Bankruptcy"
+
+        return "Other"
 
     def _classify_status(self, reason: str, row: dict[str, str]) -> str:
         low = reason.lower()

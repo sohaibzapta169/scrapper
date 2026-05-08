@@ -25,14 +25,12 @@ class AppSettings:
     interval_seconds: int = 30
     finra_start_iso: str | None = None
     finra_end_iso: str | None = None
-    otc_start_iso: str | None = None
-    otc_end_iso: str | None = None
-    # When False, UI shows one range applied to both scrapers; JSON still stores four ISOs (duplicated).
-    separate_source_date_ranges: bool = False
     dark_mode: bool = False
     font_size: int = 11
     # Empty string = use bundled default (`src/ringtone/pager_alert_tone.mp3`).
     alert_sound_path: str = ""
+    # FINRA event type filters (list of enabled event types); None or empty = all events
+    finra_event_types: list[str] | None = None
 
     def to_json_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -51,6 +49,10 @@ class AppSettings:
                 merged[key] = value
         if not str(merged.get("alert_sound_path") or "").strip() and legacy_sound:
             merged["alert_sound_path"] = legacy_sound
+        # Ensure finra_event_types is a list or None
+        evt = merged.get("finra_event_types")
+        if evt is not None and not isinstance(evt, list):
+            merged["finra_event_types"] = None
         return cls(**merged)
 
 
